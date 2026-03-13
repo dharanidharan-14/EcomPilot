@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EcomPilot AI | Product Return Intelligence</title>
+    <meta name="description" content="AI-powered product return prediction platform. Analyze listing mismatches, predict return risks, and get actionable intelligence.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --accent: #8b5cf6;
+            --glass: rgba(255, 255, 255, 0.7);
+            --glass-dark: rgba(255, 255, 255, 0.4);
+        }
+        body { font-family: 'Outfit', sans-serif; background-color: #f8fafc; }
+        .font-inter { font-family: 'Inter', sans-serif; }
+        .glass { background: var(--glass); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); }
+        .glass-dark { background: var(--glass-dark); backdrop-filter: blur(12px); }
+        .gradient-text { background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+        .premium-shadow { box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 10px 10px -5px rgba(0, 0, 0, 0.02); }
+        .premium-card { transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+        .premium-card:hover { transform: translateY(-8px); box-shadow: 0 25px 40px -12px rgba(99, 102, 241, 0.15); }
+        
+        .blob { position: absolute; width: 500px; height: 500px; background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%); border-radius: 50%; filter: blur(80px); z-index: -1; animation: blobmove 20s infinite alternate; }
+        @keyframes blobmove { from { transform: translate(-10%, -10%); } to { transform: translate(10%, 10%); } }
+
+        /* Gauges */
+        .gauge-container { position: relative; width: 220px; height: 220px; }
+        .gauge-base { stroke: #e2e8f0; fill: none; stroke-width: 12; }
+        .gauge-progress { stroke: url(#gauge-gradient); fill: none; stroke-width: 12; stroke-linecap: round; transform: rotate(-90deg); transform-origin: center; transition: stroke-dasharray 1s ease-out; }
+        .pred-gauge-container { position: relative; width: 260px; height: 260px; }
+        .pred-gauge-base { stroke: #e2e8f0; fill: none; stroke-width: 14; }
+        .pred-gauge-progress { fill: none; stroke-width: 14; stroke-linecap: round; transform: rotate(-90deg); transform-origin: center; transition: stroke-dashoffset 1.5s cubic-bezier(0.4, 0, 0.2, 1); }
+        
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-reveal { animation: slideUp 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; opacity: 0; }
+
+        /* Top-level mode tabs */
+        .mode-tab { position: relative; transition: all 0.3s ease; cursor: pointer; }
+        .mode-tab.active { color: white; background: linear-gradient(135deg, #6366f1, #8b5cf6); box-shadow: 0 8px 24px rgba(99, 102, 241, 0.35); }
+        .mode-tab:not(.active) { color: #64748b; background: white; border: 1px solid #e2e8f0; }
+        .mode-tab:not(.active):hover { border-color: #c7d2fe; color: #4f46e5; }
+        .mode-section { display: none; }
+        .mode-section.active { display: block; }
+
+        /* Upload zone */
+        .upload-zone { border: 2px dashed #cbd5e1; transition: all 0.3s ease; cursor: pointer; }
+        .upload-zone:hover { border-color: #6366f1; background: rgba(99, 102, 241, 0.03); }
+        .upload-zone.has-file { border-color: #10b981; border-style: solid; background: rgba(16, 185, 129, 0.05); }
+
+        /* Impact badges */
+        .impact-high { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+        .impact-medium { background: #fffbeb; color: #d97706; border-color: #fde68a; }
+        .impact-low { background: #f0fdf4; color: #16a34a; border-color: #bbf7d0; }
+
+        @keyframes pulseGlow { 0%, 100% { box-shadow: 0 0 20px rgba(99, 102, 241, 0.2); } 50% { box-shadow: 0 0 40px rgba(99, 102, 241, 0.4); } }
+        .pulse-glow { animation: pulseGlow 2s infinite; }
+
+        /* ── OVERFLOW FIXES ── */
+        .overflow-safe {
+            word-break: break-word;
+            overflow-wrap: break-word;
+            white-space: normal;
+            max-width: 100%;
+            overflow: hidden;
+        }
+        .cluster-content {
+            max-height: 120px;
+            overflow-y: auto;
+            font-size: 13px;
+            word-break: break-word;
+            overflow-wrap: break-word;
+        }
+        .card-safe {
+            padding: 24px;
+            border-radius: 16px;
+            max-width: 100%;
+            overflow: hidden;
+            word-break: break-word;
+            overflow-wrap: break-word;
+        }
+    </style>
+</head>
+<body class="relative overflow-x-hidden">
+    <div class="blob" style="top: -100px; left: -100px;"></div>
+    <div class="blob" style="bottom: -100px; right: -100px; animation-delay: -10s;"></div>
+
+    <!-- Navbar -->
+    <nav class="glass sticky top-0 z-50 px-8 py-5 border-b border-white/40 flex justify-between items-center">
+        <div class="flex items-center gap-3">
+            <div class="relative group">
+                <div class="absolute -inset-1 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl blur opacity-40 group-hover:opacity-100 transition duration-1000 group-hover:duration-200"></div>
+                <div class="relative p-2.5 bg-white rounded-xl shadow-sm border border-slate-100">
+                    <i data-lucide="shield-check" class="w-7 h-7 text-indigo-600"></i>
+                </div>
+            </div>
+            <div>
+                <span class="font-extrabold text-2xl tracking-tighter text-slate-900">EcomPilot <span class="gradient-text">AI</span></span>
+                <p class="text-[10px] font-bold text-slate-400 tracking-[0.2em] uppercase leading-none">Return Intelligence Engine</p>
+            </div>
+        </div>
+        <div class="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-600">
+            <a href="#" class="hover:text-indigo-600 transition-colors">Documentation</a>
+            <a href="#" class="hover:text-indigo-600 transition-colors">Market Benchmarks</a>
+            <div class="h-4 w-px bg-slate-200"></div>
+            <span class="bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-full text-xs font-bold border border-indigo-100 flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 bg-indigo-600 rounded-full animate-pulse"></span>
+                v2.0 Agentic Platform
+            </span>
+        </div>
+    </nav>
+
+    <main class="max-w-[1440px] xl:max-w-screen-2xl mx-auto px-6 py-12">
+        <!-- Hero Title -->
+        <div class="text-center mb-10 animate-reveal">
+            <h1 class="text-5xl font-extrabold text-slate-900 mb-4 tracking-tight">EcomPilot AI – Product Return <span class="gradient-text">Intelligence</span></h1>
+            <p class="text-lg text-slate-500 font-medium font-inter max-w-2xl mx-auto leading-relaxed">Analyze listing mismatches and predict return risk</p>
+        </div>
+
+        <!-- ═══════ TOP-LEVEL MODE TABS ═══════ -->
+        <div class="flex gap-3 justify-center mb-12 animate-reveal">
+            <button class="mode-tab active py-3.5 px-8 rounded-2xl font-bold text-sm tracking-tight flex items-center gap-2.5" data-mode="analytics" id="modeAnalytics">
+                <i data-lucide="bar-chart-3" class="w-4.5 h-4.5"></i> Analytics
+            </button>
+            <button class="mode-tab py-3.5 px-8 rounded-2xl font-bold text-sm tracking-tight flex items-center gap-2.5" data-mode="prediction" id="modePrediction">
+                <i data-lucide="brain-circuit" class="w-4.5 h-4.5"></i> Prediction
+            </button>
+        </div>
+
+        <!-- ══════════════════════════════════════ -->
+        <!-- ═══════    ANALYTICS SECTION    ═══════ -->
+        <!-- ══════════════════════════════════════ -->
+        <div class="mode-section active" id="sectionAnalytics">
+
+            <!-- Analytics Input -->
+            <section class="max-w-4xl mx-auto mb-16">
+                <div class="glass-dark p-3 rounded-[2rem] border border-white/60 shadow-2xl">
+                    <div class="bg-white rounded-[1.6rem] p-2 shadow-sm">
+                        <div class="flex gap-2 flex-col md:flex-row">
+                            <div class="relative flex-1 group">
+                                <div class="absolute inset-y-0 left-5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-indigo-500 transition-colors">
+                                    <i data-lucide="search" class="w-5 h-5"></i>
+                                </div>
+                                <input type="text" id="analyticsUrl" placeholder="Paste Amazon, Flipkart or eBay product URL..." 
+                                       class="w-full pl-14 pr-6 py-5 bg-transparent font-medium text-slate-700 placeholder:text-slate-400 transition-all outline-none rounded-2xl">
+                            </div>
+                            <button id="analyticsBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 px-10 rounded-2xl transition-all shadow-xl shadow-indigo-200/50 flex items-center gap-3 justify-center group">
+                                <span class="tracking-tight">Run Deep Scan</span>
+                                <i data-lucide="arrow-right" class="w-5 h-5 group-hover:translate-x-1 transition-transform"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="analyticsUrlError" class="hidden text-rose-500 text-xs font-bold mt-4 mx-6 flex items-center gap-1.5 uppercase tracking-wider">
+                        <i data-lucide="alert-circle" class="w-4 h-4"></i>
+                        Invalid E-Commerce URL
+                    </div>
+                </div>
+            </section>
+
+            <!-- Analytics Loading -->
+            <div id="analyticsLoading" class="hidden space-y-8 max-w-4xl mx-auto animate-reveal">
+                <div class="glass p-10 rounded-[2.5rem] premium-shadow border-white">
+                    <div class="flex items-center justify-between mb-10">
+                        <div class="flex items-center gap-4">
+                            <div class="relative">
+                                <i data-lucide="cpu" class="w-8 h-8 text-indigo-600 animate-pulse"></i>
+                                <div class="absolute -inset-2 bg-indigo-500 rounded-full blur-xl opacity-20"></div>
+                            </div>
+                            <div>
+                                <h2 class="text-xl font-bold text-slate-800">Neural Agent Analysis</h2>
+                                <p id="analyticsStatus" class="text-sm font-medium text-slate-500 overflow-safe">Initializing agent pipeline...</p>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <span id="analyticsPercent" class="text-3xl font-black text-indigo-600 tracking-tighter">0%</span>
+                            <p class="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Pipeline Active</p>
+                        </div>
+                    </div>
+                    <div class="relative h-4 w-full bg-slate-100 rounded-full mb-12 overflow-hidden border border-slate-200/50">
+                        <div id="analyticsBar" class="absolute inset-y-0 left-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 h-full rounded-full transition-all duration-700" style="width: 0%"></div>
+                    </div>
+                    <!-- 7 Analytics Steps -->
+                    <div class="grid grid-cols-7 gap-4">
+                        <div class="a-step group flex flex-col items-center gap-3 transition-all opacity-30 scale-95" id="a-step-1">
+                            <div class="w-12 h-12 rounded-2xl bg-slate-200 flex items-center justify-center font-bold text-slate-500 shadow-inner group-[.active]:bg-indigo-600 group-[.active]:text-white group-[.completed]:bg-emerald-500 group-[.completed]:text-white transition-all">
+                                <i data-lucide="download-cloud" class="w-5 h-5 hidden group-[.active]:block group-[.completed]:block"></i>
+                                <span class="group-[.active]:hidden group-[.completed]:hidden">1</span>
+                            </div>
+                            <span class="text-[10px] uppercase font-bold tracking-widest text-center mt-auto">Scraping</span>
+                        </div>
+                        <div class="a-step group flex flex-col items-center gap-3 transition-all opacity-30 scale-95" id="a-step-2">
+                            <div class="w-12 h-12 rounded-2xl bg-slate-200 flex items-center justify-center font-bold text-slate-500 shadow-inner group-[.active]:bg-indigo-600 group-[.active]:text-white group-[.completed]:bg-emerald-500 group-[.completed]:text-white transition-all">
+                                <i data-lucide="filter" class="w-5 h-5 hidden group-[.active]:block group-[.completed]:block"></i>
+                                <span class="group-[.active]:hidden group-[.completed]:hidden">2</span>
+                            </div>
+                            <span class="text-[10px] uppercase font-bold tracking-widest text-center mt-auto">Cleaning</span>
+                        </div>
+                        <div class="a-step group flex flex-col items-center gap-3 transition-all opacity-30 scale-95" id="a-step-3">
+                            <div class="w-12 h-12 rounded-2xl bg-slate-200 flex items-center justify-center font-bold text-slate-500 shadow-inner group-[.active]:bg-indigo-600 group-[.active]:text-white group-[.completed]:bg-emerald-500 group-[.completed]:text-white transition-all">
+                                <i data-lucide="layers" class="w-5 h-5 hidden group-[.active]:block group-[.completed]:block"></i>
+                                <span class="group-[.active]:hidden group-[.completed]:hidden">3</span>
+                            </div>
+                            <span class="text-[10px] uppercase font-bold tracking-widest text-center mt-auto">Clustering</span>
+                        </div>
+                        <div class="a-step group flex flex-col items-center gap-3 transition-all opacity-30 scale-95" id="a-step-4">
+                            <div class="w-12 h-12 rounded-2xl bg-slate-200 flex items-center justify-center font-bold text-slate-500 shadow-inner group-[.active]:bg-indigo-600 group-[.active]:text-white group-[.completed]:bg-emerald-500 group-[.completed]:text-white transition-all">
+                                <i data-lucide="brain" class="w-5 h-5 hidden group-[.active]:block group-[.completed]:block"></i>
+                                <span class="group-[.active]:hidden group-[.completed]:hidden">4</span>
+                            </div>
+                            <span class="text-[10px] uppercase font-bold tracking-widest text-center mt-auto">AI Intel</span>
+                        </div>
+                        <div class="a-step group flex flex-col items-center gap-3 transition-all opacity-30 scale-95" id="a-step-5">
+                            <div class="w-12 h-12 rounded-2xl bg-slate-200 flex items-center justify-center font-bold text-slate-500 shadow-inner group-[.active]:bg-indigo-600 group-[.active]:text-white group-[.completed]:bg-emerald-500 group-[.completed]:text-white transition-all">
+                                <i data-lucide="target" class="w-5 h-5 hidden group-[.active]:block group-[.completed]:block"></i>
+                                <span class="group-[.active]:hidden group-[.completed]:hidden">5</span>
+                            </div>
+                            <span class="text-[10px] uppercase font-bold tracking-widest text-center mt-auto">Prediction</span>
+                        </div>
+                        <div class="a-step group flex flex-col items-center gap-3 transition-all opacity-30 scale-95" id="a-step-6">
+                            <div class="w-12 h-12 rounded-2xl bg-slate-200 flex items-center justify-center font-bold text-slate-500 shadow-inner group-[.active]:bg-indigo-600 group-[.active]:text-white group-[.completed]:bg-emerald-500 group-[.completed]:text-white transition-all">
+                                <i data-lucide="file-bar-chart" class="w-5 h-5 hidden group-[.active]:block group-[.completed]:block"></i>
+                                <span class="group-[.active]:hidden group-[.completed]:hidden">6</span>
+                            </div>
+                            <span class="text-[10px] uppercase font-bold tracking-widest text-center mt-auto">Reporting</span>
+                        </div>
+                        <div class="a-step group flex flex-col items-center gap-3 transition-all opacity-30 scale-95" id="a-step-7">
+                            <div class="w-12 h-12 rounded-2xl bg-slate-200 flex items-center justify-center font-bold text-slate-500 shadow-inner group-[.active]:bg-amber-500 group-[.active]:text-white group-[.completed]:bg-amber-500 group-[.completed]:text-white transition-all border border-amber-300">
+                                <i data-lucide="lightbulb" class="w-5 h-5 hidden group-[.active]:block group-[.completed]:block"></i>
+                                <span class="group-[.active]:hidden group-[.completed]:hidden">7</span>
+                            </div>
+                            <span class="text-[10px] uppercase font-bold tracking-widest text-center mt-auto text-amber-600">Suggestion ⭐</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analytics Results -->
+            <div id="analyticsResults" class="hidden animate-reveal space-y-10 pb-20">
+                <!-- Meta Header -->
+                <div class="glass p-10 rounded-[2.5rem] premium-shadow border-white flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
+                    <div class="space-y-3 overflow-safe" style="min-width:0; flex:1;">
+                        <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-indigo-50 text-indigo-700 rounded-full font-bold text-[10px] tracking-widest uppercase border border-indigo-100 mb-2">
+                            <i data-lucide="globe" class="w-3.5 h-3.5"></i>
+                            Verified On <span id="resPlatform">AMAZON</span>
+                        </div>
+                        <h2 id="resProductName" class="text-3xl font-extrabold text-slate-900 leading-tight overflow-safe">Product Analysis</h2>
+                        <div class="flex items-center gap-6 flex-wrap">
+                            <div class="flex items-center gap-2">
+                                <div class="flex gap-0.5 text-amber-400">
+                                    <i data-lucide="star" class="w-4 h-4 fill-current"></i><i data-lucide="star" class="w-4 h-4 fill-current"></i><i data-lucide="star" class="w-4 h-4 fill-current"></i><i data-lucide="star" class="w-4 h-4 fill-current"></i><i data-lucide="star" class="w-4 h-4"></i>
+                                </div>
+                                <span id="resRating" class="font-black text-slate-800 text-lg">4.0</span>
+                            </div>
+                            <div class="w-1.5 h-1.5 bg-slate-300 rounded-full"></div>
+                            <div class="font-semibold text-slate-500">
+                                <span id="resTotalReviews" class="text-slate-900">0</span> <span class="text-sm font-inter">Reviews Scanned</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex gap-4 w-full md:w-auto shrink-0">
+                        <button class="flex-1 md:flex-none glass border-slate-200 hover:bg-white text-slate-700 font-bold px-6 py-4 rounded-2xl transition-all flex items-center justify-center gap-2 shadow-sm">
+                            <i data-lucide="download" class="w-5 h-5"></i> Export
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-4 gap-10 items-stretch">
+                    <!-- Risk Gauge -->
+                    <div class="glass rounded-[2.5rem] p-10 border-white premium-shadow flex flex-col items-center justify-center premium-card">
+                        <h3 class="text-sm font-bold text-slate-400 uppercase tracking-widest mb-8">Risk Meter</h3>
+                        <div class="gauge-container mb-8">
+                            <svg viewBox="0 0 100 100" class="w-full h-full">
+                                <defs>
+                                    <linearGradient id="gauge-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                                        <stop offset="0%" stop-color="#ef4444" />
+                                        <stop offset="100%" stop-color="#6366f1" />
+                                    </linearGradient>
+                                </defs>
+                                <circle cx="50" cy="50" r="44" class="gauge-base" />
+                                <circle cx="50" cy="50" r="44" class="gauge-progress" id="riskGaugeSVG" stroke-dasharray="0 276" />
+                            </svg>
+                            <div class="absolute inset-0 flex flex-col items-center justify-center">
+                                <span id="resRiskScore" class="text-6xl font-black text-slate-900 tracking-tighter">0</span>
+                                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Score / 100</span>
+                            </div>
+                        </div>
+                        <div id="resRiskLevel" class="w-full text-center py-3 rounded-2xl text-xs font-black uppercase tracking-[0.2em] bg-rose-50 text-rose-600 border border-rose-100">HIGH RISK</div>
+                    </div>
+                    <!-- Chart -->
+                    <div class="glass rounded-[2.5rem] p-10 border-white premium-shadow lg:col-span-3 premium-card overflow-hidden">
+                        <div class="flex justify-between items-center mb-10">
+                            <h3 class="text-lg font-bold text-slate-800 overflow-safe">Cluster Distribution</h3>
+                            <div class="flex gap-2 items-center">
+                                <div class="w-3 h-3 bg-indigo-500 rounded-sm"></div>
+                                <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Sentiment</span>
+                            </div>
+                        </div>
+                        <div class="h-[450px]"><canvas id="complaintChart"></canvas></div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-10">
+                    <!-- Mismatches -->
+                    <div class="glass rounded-[2.5rem] card-safe border-white premium-shadow premium-card">
+                        <div class="flex items-center justify-between mb-8">
+                            <div class="flex items-center gap-3">
+                                <div class="p-2.5 bg-amber-50 rounded-xl border border-amber-100"><i data-lucide="Zap" class="w-5 h-5 text-amber-600"></i></div>
+                                <h3 class="text-xl font-bold text-slate-800 tracking-tight">Listing Mismatches</h3>
+                            </div>
+                            <div class="px-3 py-1 bg-slate-900 text-white rounded-lg text-[10px] font-bold tracking-widest uppercase shadow-lg">AI Verified</div>
+                        </div>
+                        <div id="mismatchContainer" class="space-y-6 overflow-safe"></div>
+                    </div>
+                    <!-- Playbook -->
+                    <div class="glass rounded-[2.5rem] card-safe border-white premium-shadow premium-card">
+                        <div class="flex items-center gap-3 mb-8">
+                            <div class="p-2.5 bg-emerald-50 rounded-xl border border-emerald-100"><i data-lucide="PenTool" class="w-5 h-5 text-emerald-600"></i></div>
+                            <h3 class="text-xl font-bold text-slate-800 tracking-tight">Actionable Playbook</h3>
+                        </div>
+                        <div id="recommendationContainer" class="space-y-4 overflow-safe"></div>
+                    </div>
+                </div>
+
+                <!-- Clusters -->
+                <div class="glass rounded-[2.5rem] p-12 border-white premium-shadow overflow-hidden">
+                    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-12">
+                        <div>
+                            <h3 class="text-2xl font-black text-slate-900 tracking-tight">Top Customer Complaint Themes</h3>
+                            <p class="text-sm font-medium text-slate-500 mt-1">Key issues identified from automatically analyzing customer feedback.</p>
+                        </div>
+                    </div>
+                    <div id="clusterContainer" class="grid grid-cols-1 md:grid-cols-2 gap-8 text-left"></div>
+                </div>
+
+                <!-- Suggestion Agent Section -->
+                <div class="glass rounded-[2.5rem] card-safe border-white premium-shadow mt-10">
+                    <div class="flex items-center gap-3 mb-8">
+                        <div class="p-2.5 bg-amber-50 rounded-xl border border-amber-100"><i data-lucide="lightbulb" class="w-5 h-5 text-amber-600"></i></div>
+                        <h3 class="text-xl font-bold text-slate-800 tracking-tight">AI Improvement Suggestions</h3>
+                        <div class="ml-auto px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-[10px] font-bold tracking-widest uppercase">Suggestion Agent ⭐</div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
+                        <div class="space-y-4">
+                            <h4 class="text-sm font-bold text-slate-800 border-b border-slate-100 pb-2">Listing Improvements</h4>
+                            <ul id="sugListing" class="space-y-3 text-sm text-slate-600 font-medium overflow-safe"></ul>
+                        </div>
+                        <div class="space-y-4">
+                            <h4 class="text-sm font-bold text-slate-800 border-b border-slate-100 pb-2">Customer Expectation Fixes</h4>
+                            <ul id="sugCustomer" class="space-y-3 text-sm text-slate-600 font-medium overflow-safe"></ul>
+                        </div>
+                        <div class="space-y-4">
+                            <h4 class="text-sm font-bold text-slate-800 border-b border-slate-100 pb-2">Seller Optimization</h4>
+                            <ul id="sugSeller" class="space-y-3 text-sm text-slate-600 font-medium overflow-safe"></ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cost Estimation Section -->
+                <div class="glass rounded-[2.5rem] card-safe border-white premium-shadow mt-10 mb-8">
+                    <div class="flex items-center gap-3 mb-8">
+                        <div class="p-2.5 bg-rose-50 rounded-xl border border-rose-100"><i data-lucide="calculator" class="w-5 h-5 text-rose-600"></i></div>
+                        <h3 class="text-xl font-bold text-slate-800 tracking-tight">Return Cost Impact Estimation</h3>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-10 items-stretch">
+                        <div class="glass rounded-[2rem] p-6 border border-slate-100 shadow-sm overflow-hidden">
+                            <h4 class="text-sm font-bold text-slate-800 mb-6">Return Cost Breakdown</h4>
+                            <div class="h-[320px]"><canvas id="costBreakdownChart"></canvas></div>
+                        </div>
+                        <div class="glass rounded-[2rem] p-6 border border-slate-100 shadow-sm overflow-hidden bg-emerald-50/30">
+                            <h4 class="text-sm font-bold text-emerald-800 mb-6">Savings Potential</h4>
+                            <div class="h-[320px]"><canvas id="savingsPotentialChart"></canvas></div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════ -->
+        <!-- ═══════   PREDICTION SECTION   ═══════ -->
+        <!-- ══════════════════════════════════════ -->
+        <div class="mode-section" id="sectionPrediction">
+
+            <!-- Prediction Inputs -->
+            <section class="max-w-4xl mx-auto mb-16">
+                <div class="glass-dark p-3 rounded-[2rem] border border-white/60 shadow-2xl">
+                    <div class="bg-white rounded-[1.6rem] p-6 shadow-sm space-y-5">
+                        <!-- Image Uploads -->
+                        <div class="flex gap-4 flex-col sm:flex-row">
+                            <div class="upload-zone flex-1 rounded-2xl p-4 flex items-center gap-4" id="predUpload1Zone" onclick="document.getElementById('predImage1').click()">
+                                <div class="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center shrink-0 border border-slate-100">
+                                    <i data-lucide="image-plus" class="w-5 h-5 text-slate-400"></i>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-sm font-bold text-slate-700 overflow-safe" id="predUpload1Label">Upload Image 1</p>
+                                    <p class="text-[10px] text-slate-400 font-medium uppercase tracking-wider">JPG, PNG — Max 5MB</p>
+                                </div>
+                                <input type="file" id="predImage1" accept="image/*" class="hidden">
+                            </div>
+                            <div class="upload-zone flex-1 rounded-2xl p-4 flex items-center gap-4" id="predUpload2Zone" onclick="document.getElementById('predImage2').click()">
+                                <div class="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center shrink-0 border border-slate-100">
+                                    <i data-lucide="image-plus" class="w-5 h-5 text-slate-400"></i>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-sm font-bold text-slate-700 overflow-safe" id="predUpload2Label">Upload Image 2</p>
+                                    <p class="text-[10px] text-slate-400 font-medium uppercase tracking-wider">JPG, PNG — Max 5MB</p>
+                                </div>
+                                <input type="file" id="predImage2" accept="image/*" class="hidden">
+                            </div>
+                        </div>
+                        <!-- Listing Title -->
+                        <div class="relative group">
+                            <div class="absolute inset-y-0 left-5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-indigo-500 transition-colors">
+                                <i data-lucide="type" class="w-5 h-5"></i>
+                            </div>
+                            <input type="text" id="predTitle" placeholder="Listing Title (e.g. 'Premium Wireless Earbuds with ANC')" 
+                                   class="w-full pl-14 pr-6 py-4 bg-transparent font-medium text-slate-700 placeholder:text-slate-400 transition-all outline-none rounded-2xl border border-slate-100 focus:border-indigo-200">
+                        </div>
+                        <!-- Description -->
+                        <div class="relative group">
+                            <textarea id="predDescription" rows="3" placeholder="Product Description — paste the full listing description here..."
+                                      class="w-full px-6 py-4 bg-transparent font-medium text-slate-700 placeholder:text-slate-400 transition-all outline-none rounded-2xl border border-slate-100 focus:border-indigo-200 resize-none font-inter text-sm leading-relaxed"></textarea>
+                        </div>
+                        <!-- Run Button -->
+                        <button id="predictionBtn" class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold py-5 px-10 rounded-2xl transition-all shadow-xl shadow-indigo-200/50 flex items-center gap-3 justify-center group">
+                            <i data-lucide="brain-circuit" class="w-5 h-5"></i>
+                            <span class="tracking-tight">Run Prediction</span>
+                            <i data-lucide="arrow-right" class="w-5 h-5 group-hover:translate-x-1 transition-transform"></i>
+                        </button>
+                    </div>
+                    <div id="predInputError" class="hidden text-rose-500 text-xs font-bold mt-4 mx-6 flex items-center gap-1.5 uppercase tracking-wider">
+                        <i data-lucide="alert-circle" class="w-4 h-4"></i>
+                        Please provide listing title and at least one image
+                    </div>
+                </div>
+            </section>
+
+            <!-- Prediction Loading -->
+            <div id="predictionLoading" class="hidden space-y-8 max-w-4xl mx-auto animate-reveal">
+                <div class="glass p-10 rounded-[2.5rem] premium-shadow border-white">
+                    <div class="flex items-center justify-between mb-10">
+                        <div class="flex items-center gap-4">
+                            <div class="relative">
+                                <i data-lucide="brain-circuit" class="w-8 h-8 text-purple-600 animate-pulse"></i>
+                                <div class="absolute -inset-2 bg-purple-500 rounded-full blur-xl opacity-20"></div>
+                            </div>
+                            <div>
+                                <h2 class="text-xl font-bold text-slate-800">Prediction Agent Pipeline</h2>
+                                <p id="predStatus" class="text-sm font-medium text-slate-500 overflow-safe">Initializing prediction agents...</p>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <span id="predPercent" class="text-3xl font-black text-purple-600 tracking-tighter">0%</span>
+                            <p class="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Prediction Active</p>
+                        </div>
+                    </div>
+                    <div class="relative h-4 w-full bg-slate-100 rounded-full mb-12 overflow-hidden border border-slate-200/50">
+                        <div id="predBar" class="absolute inset-y-0 left-0 bg-gradient-to-r from-purple-500 via-fuchsia-500 to-pink-500 h-full rounded-full transition-all duration-700" style="width: 0%"></div>
+                    </div>
+                    <!-- 5 Prediction Steps -->
+                    <div class="grid grid-cols-5 gap-4">
+                        <div class="p-step group flex flex-col items-center gap-3 transition-all opacity-30 scale-95" id="p-step-1">
+                            <div class="w-12 h-12 rounded-2xl bg-slate-200 flex items-center justify-center font-bold text-slate-500 shadow-inner group-[.active]:bg-purple-600 group-[.active]:text-white group-[.completed]:bg-emerald-500 group-[.completed]:text-white transition-all">
+                                <i data-lucide="scan-eye" class="w-5 h-5 hidden group-[.active]:block group-[.completed]:block"></i>
+                                <span class="group-[.active]:hidden group-[.completed]:hidden">1</span>
+                            </div>
+                            <span class="text-[9px] uppercase font-bold tracking-widest text-center leading-tight">Image<br>Analysis</span>
+                        </div>
+                        <div class="p-step group flex flex-col items-center gap-3 transition-all opacity-30 scale-95" id="p-step-2">
+                            <div class="w-12 h-12 rounded-2xl bg-slate-200 flex items-center justify-center font-bold text-slate-500 shadow-inner group-[.active]:bg-purple-600 group-[.active]:text-white group-[.completed]:bg-emerald-500 group-[.completed]:text-white transition-all">
+                                <i data-lucide="file-search" class="w-5 h-5 hidden group-[.active]:block group-[.completed]:block"></i>
+                                <span class="group-[.active]:hidden group-[.completed]:hidden">2</span>
+                            </div>
+                            <span class="text-[9px] uppercase font-bold tracking-widest text-center leading-tight">Listing<br>Analysis</span>
+                        </div>
+                        <div class="p-step group flex flex-col items-center gap-3 transition-all opacity-30 scale-95" id="p-step-3">
+                            <div class="w-12 h-12 rounded-2xl bg-slate-200 flex items-center justify-center font-bold text-slate-500 shadow-inner group-[.active]:bg-purple-600 group-[.active]:text-white group-[.completed]:bg-emerald-500 group-[.completed]:text-white transition-all">
+                                <i data-lucide="git-branch" class="w-5 h-5 hidden group-[.active]:block group-[.completed]:block"></i>
+                                <span class="group-[.active]:hidden group-[.completed]:hidden">3</span>
+                            </div>
+                            <span class="text-[9px] uppercase font-bold tracking-widest text-center leading-tight">Feature<br>Extraction</span>
+                        </div>
+                        <div class="p-step group flex flex-col items-center gap-3 transition-all opacity-30 scale-95" id="p-step-4">
+                            <div class="w-12 h-12 rounded-2xl bg-slate-200 flex items-center justify-center font-bold text-slate-500 shadow-inner group-[.active]:bg-purple-600 group-[.active]:text-white group-[.completed]:bg-emerald-500 group-[.completed]:text-white transition-all">
+                                <i data-lucide="target" class="w-5 h-5 hidden group-[.active]:block group-[.completed]:block"></i>
+                                <span class="group-[.active]:hidden group-[.completed]:hidden">4</span>
+                            </div>
+                            <span class="text-[9px] uppercase font-bold tracking-widest text-center leading-tight">Return<br>Prediction</span>
+                        </div>
+                        <div class="p-step group flex flex-col items-center gap-3 transition-all opacity-30 scale-95" id="p-step-5">
+                            <div class="w-12 h-12 rounded-2xl bg-slate-200 flex items-center justify-center font-bold text-slate-500 shadow-inner group-[.active]:bg-purple-600 group-[.active]:text-white group-[.completed]:bg-emerald-500 group-[.completed]:text-white transition-all">
+                                <i data-lucide="file-bar-chart" class="w-5 h-5 hidden group-[.active]:block group-[.completed]:block"></i>
+                                <span class="group-[.active]:hidden group-[.completed]:hidden">5</span>
+                            </div>
+                            <span class="text-[9px] uppercase font-bold tracking-widest text-center leading-tight">Prediction<br>Report</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Prediction Results -->
+            <div id="predictionResults" class="hidden animate-reveal space-y-10 pb-20">
+                <!-- Prediction Header -->
+                <div class="text-center">
+                    <h3 class="text-3xl font-extrabold text-slate-900 tracking-tight">Return <span class="gradient-text">Prediction</span></h3>
+                    <p class="text-sm text-slate-500 font-medium mt-2">Multi-agent intelligence prediction for product return risk</p>
+                </div>
+
+                <!-- Score + Probability Row -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-10 items-stretch">
+                    <!-- Gauge -->
+                    <div class="glass rounded-[2.5rem] p-10 border-white premium-shadow flex flex-col items-center justify-center premium-card pulse-glow">
+                        <h3 class="text-sm font-bold text-slate-400 uppercase tracking-widest mb-6">Return Risk Score</h3>
+                        <div class="pred-gauge-container mb-6">
+                            <svg viewBox="0 0 120 120" class="w-full h-full">
+                                <defs>
+                                    <linearGradient id="pred-gauge-grad-low" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#34d399"/></linearGradient>
+                                    <linearGradient id="pred-gauge-grad-med" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#fbbf24"/></linearGradient>
+                                    <linearGradient id="pred-gauge-grad-high" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#ef4444"/><stop offset="100%" stop-color="#f87171"/></linearGradient>
+                                </defs>
+                                <circle cx="60" cy="60" r="52" class="pred-gauge-base" />
+                                <circle cx="60" cy="60" r="52" class="pred-gauge-progress" id="predGaugeSVG" stroke="url(#pred-gauge-grad-high)" stroke-dasharray="326.73" stroke-dashoffset="326.73" />
+                            </svg>
+                            <div class="absolute inset-0 flex flex-col items-center justify-center">
+                                <span id="predRiskScore" class="text-7xl font-black text-slate-900 tracking-tighter">0</span>
+                                <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">/ 100</span>
+                            </div>
+                        </div>
+                        <div id="predRiskLevel" class="w-full text-center py-3.5 rounded-2xl text-sm font-black uppercase tracking-[0.15em] bg-rose-50 text-rose-600 border border-rose-100 shadow-sm">HIGH RETURN RISK</div>
+                    </div>
+
+                    <!-- Probability + Sentiment -->
+                    <div class="lg:col-span-2 space-y-6">
+                        <div class="glass rounded-[2rem] p-8 border-white premium-shadow">
+                            <div class="flex items-center gap-3 mb-6">
+                                <div class="p-2.5 bg-indigo-50 rounded-xl border border-indigo-100"><i data-lucide="percent" class="w-5 h-5 text-indigo-600"></i></div>
+                                <h4 class="text-lg font-bold text-slate-800">Return Probability</h4>
+                            </div>
+                            <div class="flex items-end gap-3 mb-4">
+                                <span id="predProbability" class="text-5xl font-black text-indigo-600 tracking-tighter">0.00</span>
+                                <span class="text-slate-400 font-bold text-sm mb-2">Return Chance</span>
+                            </div>
+                            <div class="w-full h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                                <div id="predProbBar" class="h-full rounded-full bg-gradient-to-r from-emerald-400 via-amber-400 to-rose-500 transition-all duration-1000" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="glass rounded-[2rem] p-8 border-white premium-shadow">
+                            <div class="flex items-center gap-3 mb-6">
+                                <div class="p-2.5 bg-purple-50 rounded-xl border border-purple-100"><i data-lucide="pie-chart" class="w-5 h-5 text-purple-600"></i></div>
+                                <h4 class="text-lg font-bold text-slate-800">Prediction Summary</h4>
+                            </div>
+                            <div id="predSummaryText" class="text-sm text-slate-600 font-medium leading-relaxed overflow-safe">Prediction analysis will appear here.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Drivers -->
+                <div class="glass rounded-[2.5rem] card-safe border-white premium-shadow">
+                    <div class="flex items-center gap-3 mb-8">
+                        <div class="p-2.5 bg-amber-50 rounded-xl border border-amber-100"><i data-lucide="list-checks" class="w-5 h-5 text-amber-600"></i></div>
+                        <h3 class="text-xl font-bold text-slate-800 tracking-tight">Prediction Drivers</h3>
+                        <div class="ml-auto px-3 py-1 bg-slate-900 text-white rounded-lg text-[10px] font-bold tracking-widest uppercase">Multi-Agent</div>
+                    </div>
+                    <div id="predDriversContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-safe"></div>
+                </div>
+
+                <!-- Image Analysis -->
+                <div class="glass rounded-[2.5rem] card-safe border-white premium-shadow">
+                    <div class="flex items-center gap-3 mb-8">
+                        <div class="p-2.5 bg-blue-50 rounded-xl border border-blue-100"><i data-lucide="scan-eye" class="w-5 h-5 text-blue-600"></i></div>
+                        <h3 class="text-xl font-bold text-slate-800 tracking-tight">Image Analysis</h3>
+                    </div>
+                    <div id="imageAnalysisContainer" class="grid grid-cols-1 md:grid-cols-2 gap-6 overflow-safe"></div>
+                    <div id="imageNoData" class="text-center py-8 text-slate-400 font-medium hidden">
+                        <i data-lucide="image-off" class="w-12 h-12 mx-auto mb-3 opacity-40"></i>
+                        <p>No images were uploaded for analysis</p>
+                    </div>
+                </div>
+
+                <!-- Complaint Themes -->
+                <div class="glass rounded-[2.5rem] card-safe border-white premium-shadow">
+                    <div class="flex items-center gap-3 mb-8">
+                        <div class="p-2.5 bg-rose-50 rounded-xl border border-rose-100"><i data-lucide="message-square-warning" class="w-5 h-5 text-rose-600"></i></div>
+                        <h3 class="text-xl font-bold text-slate-800 tracking-tight">Top Complaint Themes</h3>
+                    </div>
+                    <div class="h-[400px]"><canvas id="complaintThemesChart"></canvas></div>
+                </div>
+
+                <!-- External Complaints -->
+                <div class="glass rounded-[2.5rem] card-safe border-white premium-shadow">
+                    <div class="flex items-center gap-3 mb-8">
+                        <div class="p-2.5 bg-violet-50 rounded-xl border border-violet-100"><i data-lucide="globe-2" class="w-5 h-5 text-violet-600"></i></div>
+                        <h3 class="text-xl font-bold text-slate-800 tracking-tight">External Web Complaints</h3>
+                    </div>
+                    <div id="externalComplaintsContainer" class="space-y-4 overflow-safe"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="app.js"></script>
+    <script>lucide.createIcons();</script>
+</body>
+</html>
